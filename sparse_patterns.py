@@ -81,3 +81,20 @@ def build_block_pattern(
         pattern.append(sorted(allowed))
 
     return pattern
+
+
+
+def pattern_to_full_mask(N: int, block_size: int, pattern: List[List[int]], causal: bool = True, device=None) -> torch.Tensor:
+    mask = torch.zeros(N, N, dtype=torch.bool, device=device)
+    for qb, key_blocks in enumerate(pattern):
+        q_lo, q_hi = qb * block_size, min((qb + 1) * block_size, N)
+        if q_lo >= N:
+            break
+        for kb in key_blocks:
+            k_lo, k_hi = kb * block_size, min((kb + 1) * block_size, N)
+            if k_lo >= N:
+                continue
+            mask[q_lo:q_hi, k_lo:k_hi] = True
+    if causal:
+        mask = mask & causal_mask(N, device=device)
+    return mask
