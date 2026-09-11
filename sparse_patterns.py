@@ -21,22 +21,7 @@ def build_block_pattern(
     causal: bool = True,
     generator: Optional[torch.Generator] = None,
 ) -> List[List[int]]:
-    """
-    Returns pattern[qb] = sorted list of key-block indices query block qb
-    may attend to (before fine-grained, token-level trimming).
 
-    kind='sliding_window': local blocks only (a safe superset later
-        trimmed to the exact token window by the engine's extra_valid_fn).
-    kind='block_sparse': BigBird-style local + global + random, matching
-        the classic construction:
-          - local: |query_block - key_block| <= local_window_blocks
-          - global: the first `num_global_blocks` blocks are attended to
-            by every query (global "columns"), AND themselves attend to
-            everything causally available (global "rows" — a global
-            query gets full causal attention, not just local/random).
-          - random: each non-global query block additionally attends to
-            `num_random_blocks` randomly chosen blocks.
-    """
     assert kind in ("sliding_window", "block_sparse")
     pattern: List[List[int]] = []
 
@@ -47,10 +32,7 @@ def build_block_pattern(
             pattern.append(list(range(lo, hi + 1)))
             continue
 
-        # kind == "block_sparse"
         if qb < num_global_blocks:
-            # Global query block: full causal attention (matches the
-            # "global rows attend to everything" BigBird property).
             hi = qb if causal else num_blocks - 1
             pattern.append(list(range(0, hi + 1)))
             continue
