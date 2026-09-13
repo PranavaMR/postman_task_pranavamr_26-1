@@ -2,11 +2,6 @@ import torch
 import torch.nn.functional as F
 
 
-"""
-Returns attention weights of the same shape, softmaxed over the last
-    dim within valid_mask, with fully-invalid rows set to all-zero
-    (never NaN).
-"""
 def safe_softmax(scores: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
 
     valid_mask = valid_mask.expand_as(scores)
