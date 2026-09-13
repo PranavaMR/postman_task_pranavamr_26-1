@@ -1,9 +1,12 @@
-import torch
+#task 1.2
+import torch  # type: ignore[import-not-found]
 import math
 from typing import List, Optional, Callable
 
 from .utils import safe_softmax, causal_mask
-
+"""
+all comments are made by me for my referenece
+"""
 def _pad_to_blocks(x: torch.Tensor, block_size: int):
     B, H, N, D = x.shape
     pad = (block_size - N % block_size) % block_size
@@ -45,7 +48,9 @@ def build_block_pattern(
         for gb in range(min(num_global_blocks, num_blocks)):
             if not causal or gb <= qb:
                 allowed.add(gb)
-
+        #this produces the random blocks, that are not in allowed, 
+        # and not > qb if causal is true, then adds them to allowed
+        #then its sorted and added to the pattern
         if num_random_blocks > 0:
             candidates = [
                 b for b in range(num_blocks)
@@ -66,6 +71,9 @@ def build_block_pattern(
 
 
 
+# essentially the purpose of the function is to convert the 
+# block pattern into a full attention mask of shape (N, N) 
+# where N is the sequence length.
 def pattern_to_full_mask(N: int, block_size: int, pattern: List[List[int]], causal: bool = True, device=None) -> torch.Tensor:
     mask = torch.zeros(N, N, dtype=torch.bool, device=device)
     for qb, key_blocks in enumerate(pattern):
@@ -91,7 +99,7 @@ def block_sparse_attention(
     extra_valid_fn: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
 ):
     B, H, N, D = Q.shape
-    Qp, _ = _pad_to_blocks(Q, block_size)
+    Qp, _ = _pad_to_blocks(Q, block_size) # padding if N is not divisible by block_size
     Kp, _ = _pad_to_blocks(K, block_size)
     Vp, _ = _pad_to_blocks(V, block_size)
     Np = Qp.shape[2]
@@ -99,27 +107,33 @@ def block_sparse_attention(
     assert len(pattern) == num_blocks, f"pattern has {len(pattern)} blocks, expected {num_blocks}"
 
     out = torch.zeros_like(Qp)
-
+    #initializing the output tensor.
     for qb in range(num_blocks):
         key_blocks = pattern[qb]
         if not key_blocks:
             continue  
-
+        #seperating 1 query block
         q_lo, q_hi = qb * block_size, (qb + 1) * block_size
         q_slice = Qp[:, :, q_lo:q_hi, :]  # (B, H, bs, D) ( for my reference )
 
+        # actual token indices of the key blocks concatenated together
         k_idx = torch.cat([
             torch.arange(kb * block_size, (kb + 1) * block_size, device=Qp.device)
             for kb in key_blocks
         ])
+        # k_idx is literally "the key tokens im going to retrieve in kv for this qb"
         k_gather = Kp[:, :, k_idx, :]  # (B, H, gathered_len, D) ( for my own referencee)
-        v_gather = Vp[:, :, k_idx, :]
+        v_gather = Vp[:, :, k_idx, :] # same for V.
 
-        scores = torch.matmul(q_slice, k_gather.transpose(-2, -1)) / math.sqrt(D)  # (B, H, bs, gathered_len)
+        scores = torch.matmul(
+            q_slice, 
+            k_gather.transpose(-2, -1)
+            ) / math.sqrt(D)  # (B, H, bs, gathered_len)
+        #scores.shape = (B, H, bs, gathered_len )
 
         q_pos = torch.arange(q_lo, q_hi, device=Qp.device).unsqueeze(1)  # (bs, 1)
         k_pos = k_idx.unsqueeze(0)  # (1, gathered_len)
-
+        #.unsqueeze turns [a,b,c] to [[a],[b],[c]] so that it can be broadcasted to (bs, gathered_len)
         valid = (k_pos <= q_pos) if causal else torch.ones(q_pos.shape[0], k_pos.shape[1], dtype=torch.bool, device=Qp.device)
         valid = valid & (k_pos < N)  
         if extra_valid_fn is not None:
@@ -129,3 +143,50 @@ def block_sparse_attention(
         out[:, :, q_lo:q_hi, :] = torch.matmul(attn, v_gather)
 
     return out[:, :, :N, :]
+
+
+
+def sliding_window_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, window: int, block_size: Optional[int] = None, causal: bool = True):
+    #decides bs
+    #how many blocks
+    #block pattern
+    #extra mask
+    #call bsa with the parameters
+    B, H, N, D = Q.shape
+    if block_size is None:
+        block_size = max(1, min(window, 64))
+    num_blocks = math.ceil(N / block_size)
+    local_window_blocks = math.ceil(window / block_size) + 1  # safe superset, trimmed exactly below
+
+    pattern = build_block_pattern(num_blocks, kind="sliding_window", local_window_blocks=local_window_blocks, causal=causal)
+
+    def extra_valid_fn(q_pos, k_pos):
+        if causal:
+            return k_pos >= (q_pos - window)
+        return (k_pos >= q_pos - window) & (k_pos <= q_pos + window)
+
+    return block_sparse_attention(Q, K, V, block_size, pattern, causal=causal, extra_valid_fn=extra_valid_fn)
+
+
+def block_sparse_bigbird_attention(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    block_size: int,
+    num_global_blocks: int,
+    num_random_blocks: int,
+    local_window_blocks: int = 1,
+    causal: bool = True,
+    generator: Optional[torch.Generator] = None,
+):
+    B, H, N, D = Q.shape
+    num_blocks = math.ceil(N / block_size)
+    pattern = build_block_pattern(
+        num_blocks, kind="block_sparse",
+        local_window_blocks=local_window_blocks,
+        num_global_blocks=num_global_blocks,
+        num_random_blocks=num_random_blocks,
+        causal=causal, generator=generator,
+    )
+    out = block_sparse_attention(Q, K, V, block_size, pattern, causal=causal)
+    return out, pattern
