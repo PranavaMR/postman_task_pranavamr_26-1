@@ -1,0 +1,123 @@
+{
+  "hardware": "Tesla T4",
+  "shape": {
+    "B": 1,
+    "H": 4,
+    "D": 64,
+    "window": 128,
+    "block_size": 64,
+    "num_global_blocks": 1,
+    "num_random_blocks": 3
+  },
+  "results": [
+    {
+      "variant": "dense",
+      "N": 512,
+      "time_s": 0.0005927199999860022,
+      "peak_mem_mb": 30.876953125
+    },
+    {
+      "variant": "sliding_window",
+      "N": 512,
+      "time_s": 0.004393078000020978,
+      "peak_mem_mb": 12.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 512,
+      "time_s": 0.004255344000000605,
+      "peak_mem_mb": 13.24609375
+    },
+    {
+      "variant": "dense",
+      "N": 1024,
+      "time_s": 0.0020887809999976525,
+      "peak_mem_mb": 96.12890625
+    },
+    {
+      "variant": "sliding_window",
+      "N": 1024,
+      "time_s": 0.008667120999973577,
+      "peak_mem_mb": 14.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 1024,
+      "time_s": 0.008653759000026184,
+      "peak_mem_mb": 15.24609375
+    },
+    {
+      "variant": "dense",
+      "N": 2048,
+      "time_s": 0.007429386000012528,
+      "peak_mem_mb": 354.1328125
+    },
+    {
+      "variant": "sliding_window",
+      "N": 2048,
+      "time_s": 0.01684615100003839,
+      "peak_mem_mb": 18.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 2048,
+      "time_s": 0.016997155000012754,
+      "peak_mem_mb": 19.24609375
+    },
+    {
+      "variant": "dense",
+      "N": 4096,
+      "time_s": 0.026165382999977282,
+      "peak_mem_mb": 1380.140625
+    },
+    {
+      "variant": "sliding_window",
+      "N": 4096,
+      "time_s": 0.034180958000035844,
+      "peak_mem_mb": 26.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 4096,
+      "time_s": 0.034424413000010645,
+      "peak_mem_mb": 27.24609375
+    },
+    {
+      "variant": "dense",
+      "N": 8192,
+      "time_s": 0.10449514499998713,
+      "peak_mem_mb": 5472.15625
+    },
+    {
+      "variant": "sliding_window",
+      "N": 8192,
+      "time_s": 0.08870606700003236,
+      "peak_mem_mb": 42.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 8192,
+      "time_s": 0.09584561600001962,
+      "peak_mem_mb": 43.24609375
+    },
+    {
+      "variant": "dense",
+      "N": 16384,
+      "time_s": null,
+      "peak_mem_mb": null,
+      "failed": true
+    },
+    {
+      "variant": "sliding_window",
+      "N": 16384,
+      "time_s": 0.13498283100000208,
+      "peak_mem_mb": 74.2060546875
+    },
+    {
+      "variant": "block_sparse",
+      "N": 16384,
+      "time_s": 0.1355150379999941,
+      "peak_mem_mb": 75.24609375
+    }
+  ]
+}

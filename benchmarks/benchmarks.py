@@ -22,6 +22,7 @@ print(f"Running on: {torch.cuda.get_device_name(0)}", file=sys.stderr)
 #batch size, number of heads, embedding dimension per head
 #number of heads chosen as 4 for colab T4 GPU
 #for nvidia rtx 3060 16gb you can use H=8
+#16384 will be OOM for dense attention on T4.
 B, H, D = 1, 4, 64
 WINDOW = 128
 BLOCK_SIZE = 64
