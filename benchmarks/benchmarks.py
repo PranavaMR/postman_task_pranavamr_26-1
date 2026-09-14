@@ -11,6 +11,10 @@ from patterns.dense_attention import dense_attention
 from patterns.sparse_patterns import sliding_window_attention, block_sparse_bigbird_attention
 from patterns.utils import causal_mask
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 assert torch.cuda.is_available(), (
     "No CUDA GPU visible. On Colab: Runtime -> Change runtime type -> "
     "Hardware accelerator -> T4 GPU, then re-run this cell. Running this "
@@ -74,9 +78,7 @@ def run_single(variant: str, N: int):
 
 
 def make_plots(results, out_dir):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+
 
     variants = ["dense", "sliding_window", "block_sparse"]
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
