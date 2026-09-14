@@ -7,13 +7,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 
-from src.dense_attention import dense_attention
-from src.sparse_patterns import (
+from patterns.dense_attention import dense_attention
+from patterns.sparse_patterns import (
     sliding_window_attention,
     block_sparse_bigbird_attention,
     pattern_to_full_mask,
 )
-from src.utils import sliding_window_full_mask, safe_softmax
+from patterns.utils import sliding_window_full_mask, safe_softmax
 
 torch.manual_seed(0)
 

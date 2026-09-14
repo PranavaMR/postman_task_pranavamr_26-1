@@ -7,9 +7,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 
-from src.dense_attention import dense_attention
-from src.sparse_patterns import sliding_window_attention, block_sparse_bigbird_attention
-from src.utils import causal_mask
+from patterns.dense_attention import dense_attention
+from patterns.sparse_patterns import sliding_window_attention, block_sparse_bigbird_attention
+from patterns.utils import causal_mask
 
 assert torch.cuda.is_available(), (
     "No CUDA GPU visible. On Colab: Runtime -> Change runtime type -> "
