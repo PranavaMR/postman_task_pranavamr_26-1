@@ -76,12 +76,12 @@ def test_sliding_window_matches_dense_noncausal():
 #for example, for query 10 in 4,5,6,7,8,9,10,11,12,13,14, if window is 1, then sliding window
 #implements the same mask as dense attention with a sliding window of 1, and this test checks that the outputs match. 
 #so sliding window will consider keys 9,10,11, along with dense
-#but in sparse, the query block 10 will only consider key blocks 9,10,11
+#but in sparse, the query token 10 will only consider key tokens 9,10,11
 #so when does the random+global+local pattern come into play
 #if I have [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14] and I have 3 global blocks and 2 random blocks
-#then for query block 10, the allowed key blocks will be 9,10,11 (local), 0,1,2 (global),
-#and 2 random blocks from the remaining blocks (3,4,5,6,7,8,12,13,14)
-#thats bigbird, in normal dense/sparse attention, 10 will consider all key blocks.
+#then for query token 10, the allowed key tokens will be 9,10,11 (local), 0,1,2 (global),
+#and 2 random tokens from the remaining tokens (3,4,5,6,7,8,12,13,14)
+#thats bigbird, in normal dense/sparse attention, 10 will consider all key tokens.
 #masking is basically just hiding. the NxN is still there, but masked out entries are set 
 #to -inf.
 
@@ -160,7 +160,7 @@ def test_block_sparse_no_nan_first_query_block():
 
 
 def test_empty_pattern_block_no_nan():
-    from src.sparse_patterns import block_sparse_attention
+    from patterns.sparse_patterns import block_sparse_attention
     B, H, N, D = 1, 1, 16, 4
     Q, K, V = make_qkv(B, H, N, D)
     pattern = [[0], []]  # second block has NO allowed key blocks at all
