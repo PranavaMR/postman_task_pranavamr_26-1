@@ -7,15 +7,15 @@ This repository implements and studies two sparse attention patterns from scratc
 
 It also contains a dense attention reference implementation, a correctness harness, a Tiny Shakespeare character-level GPT experiment, and GPU benchmarks.
 
-The point of the project is not just to reproduce a known sparse-attention pattern. I wanted to understand what changes when we stop computing the full \(N\times N\) attention matrix, how to verify that the sparse implementation is correct, and what the trade-offs actually look like on a real GPU.
+The point of the project is not just to reproduce a known sparse-attention pattern. I wanted to understand what changes when we stop computing the full $N \times N$ attention matrix, how to verify that the sparse implementation is correct, and what the trade-offs actually look like on a real GPU.
 
 ## What is being compared?
 
 Dense causal attention computes
 
-\[
-\mathrm{softmax}\left(\frac{QK^T}{\sqrt D}\right)V
-\]
+$$
+\mathrm{softmax}\left(\frac{QK^T}{\sqrt{D}}\right)V
+$$
 
 over every query-key pair, subject to the causal mask.
 
@@ -23,13 +23,13 @@ The sparse implementations use the same basic attention calculation, but they fi
 
 ### Sliding window
 
-A query at position \(i\) can attend only to nearby positions.
+A query at position $i$ can attend only to nearby positions.
 
 For causal attention:
 
-\[
-i-\text{window} \le j \le i
-\]
+$$
+i - \text{window} \le j \le i
+$$
 
 The implementation uses block-level routing as a safe superset and then applies a token-level mask to get the exact window.
 
@@ -43,7 +43,7 @@ Each query block can use:
 
 Only those K/V blocks are gathered for the attention calculation.
 
-The important distinction is that the implementation does **not** build the full \(N\times N\) score matrix and then throw most of it away. The unnecessary blocks are never used in the sparse computation.
+The important distinction is that the implementation does **not** build the full $N \times N$ score matrix and then throw most of it away. The unnecessary blocks are never used in the sparse computation.
 
 ## Project structure
 
@@ -77,7 +77,7 @@ The correctness tests compare the sparse implementations against dense attention
 
 For sliding-window attention, the test constructs the full token-level sliding-window mask and compares the sparse result with dense attention using that mask.
 
-For BigBird attention, the test takes the actual block routing pattern and expands it into a full \(N\times N\) mask before running dense attention.
+For BigBird attention, the test takes the actual block routing pattern and expands it into a full $N \times N$ mask before running dense attention.
 
 There are also tests for:
 
@@ -184,7 +184,7 @@ Dense attention eventually runs out of memory at the largest tested sequence len
 
 This implementation is intentionally simple and written for understanding rather than maximum GPU performance.
 
-Because the sparse engine loops over query blocks in Python and launches smaller GPU operations, sparse attention is not guaranteed to be faster at short sequence lengths. In the recorded T4 benchmark, dense attention was faster through \(N=4096\), while the sparse variants became faster at \(N=8192\). Dense attention then failed with OOM at \(N=16384\), while both sparse implementations completed.
+Because the sparse engine loops over query blocks in Python and launches smaller GPU operations, sparse attention is not guaranteed to be faster at short sequence lengths. In the recorded T4 benchmark, dense attention was faster through $N=4096$, while the sparse variants became faster at $N=8192$. Dense attention then failed with OOM at $N=16384$, while both sparse implementations completed.
 
 So the main result is not:
 

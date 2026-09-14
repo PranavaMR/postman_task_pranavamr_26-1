@@ -6,16 +6,16 @@ The goal of this task was to understand what is actually gained by making self-a
 
 I implemented dense causal attention from the basic equation
 
-\[
-\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\left(\frac{QK^T}{\sqrt{D}}\right)V
-\]
+```
+Attention(Q, K, V) = softmax(Q · Kᵀ / √D) · V
+```
 
 and then built two sparse variants on top of a shared block-based execution engine:
 
 - sliding-window attention
 - BigBird-style block-sparse attention with local, global and random connections
 
-The important implementation choice was not to compute the full \(N\times N\) attention matrix and then mask most of it. Instead, the sparse implementation selects the key/value blocks a query block is allowed to see, gathers only those blocks, and computes attention on that smaller set. The mask is then used for token-level restrictions such as causality, padding, and the exact sliding-window boundary.
+The important implementation choice was not to compute the full N×N attention matrix and then mask most of it. Instead, the sparse implementation selects the key/value blocks a query block is allowed to see, gathers only those blocks, and computes attention on that smaller set. The mask is then used for token-level restrictions such as causality, padding, and the exact sliding-window boundary.
 
 I also wrote a correctness harness that compares the sparse implementations against dense attention using the same effective attention pattern.
 
@@ -25,11 +25,11 @@ I also wrote a correctness harness that compares the sparse implementations agai
 
 The code is split into a few simple pieces.
 
-`dense_attention()` is the reference implementation. It computes the complete \(QK^T\) matrix, applies a boolean mask, performs a safe softmax, and multiplies the attention weights by \(V\).
+`dense_attention()` is the reference implementation. It computes the complete Q·Kᵀ matrix, applies a boolean mask, performs a safe softmax, and multiplies the attention weights by V.
 
 The sparse implementation is built around two ideas. First, `build_block_pattern()` decides which key blocks each query block is allowed to access. Second, `block_sparse_attention()` actually gathers those K/V blocks and runs attention on them.
 
-This separation turned out to be important. A sparse pattern is not useful for performance if the program still computes the full dense \(N\times N\) matrix first. The block-level routing is what lets the implementation avoid those unnecessary scores.
+This separation turned out to be important. A sparse pattern is not useful for performance if the program still computes the full dense N×N matrix first. The block-level routing is what lets the implementation avoid those unnecessary scores.
 
 For sliding-window attention, I use a deliberately safe superset of nearby blocks and then apply a finer token-level validity function to trim it to the exact window. For BigBird-style attention, the pattern combines local blocks, global blocks, and randomly selected blocks.
 
@@ -50,7 +50,7 @@ The correctness tests compare:
 
 The tests also deliberately include awkward cases: a sequence length that is not divisible by the block size, fully masked rows, an empty pattern for a query block, and the first query block in a causal BigBird setup.
 
-The reason for having a dense reference at all is simple: for the sparse implementation, many entries of the conceptual \(N\times N\) attention matrix are never computed. The reference mask reconstructs those same allowed connections at full resolution, which gives a straightforward way to check the sparse result.
+The reason for having a dense reference at all is simple: for the sparse implementation, many entries of the conceptual N×N attention matrix are never computed. The reference mask reconstructs those same allowed connections at full resolution, which gives a straightforward way to check the sparse result.
 
 ---
 
@@ -104,7 +104,7 @@ A normal local token participates in attention mostly with its neighbors. A glob
 
 That means a small number of global blocks can influence many parts of the sequence. Removing one ordinary local connection affects a relatively small region; removing a well-placed global connection can remove a route that many query positions were relying on.
 
-I did not run a separate ablation that varies the number of global blocks, so I am treating this as an explanation of the pattern rather than claiming a measured “global-token effect” from this experiment.
+I did not run a separate ablation that varies the number of global blocks, so I am treating this as an explanation of the pattern rather than claiming a measured "global-token effect" from this experiment.
 
 ---
 
@@ -139,11 +139,11 @@ Memory is where sparse attention showed a clear advantage at every tested sequen
 | 8192 | 0.10450 | 0.08871 | 0.09585 | 5472.2 | 42.2 | 43.2 |
 | 16384 | OOM | 0.13498 | 0.13552 | OOM | 74.2 | 75.2 |
 
-Dense attention's memory grows very quickly with sequence length because the score matrix is quadratic in \(N\). The sparse implementations stay much flatter because they never materialize that full score matrix.
+Dense attention's memory grows very quickly with sequence length because the score matrix is quadratic in N. The sparse implementations stay much flatter because they never materialize that full score matrix.
 
-At \(N=8192\), dense attention used about 5.47 GB of peak GPU memory in this benchmark, compared with about 42 MB for sliding-window attention and 43 MB for block-sparse attention.
+At N = 8192, dense attention used about 5.47 GB of peak GPU memory in this benchmark, compared with about 42 MB for sliding-window attention and 43 MB for block-sparse attention.
 
-At \(N=16384\), dense attention ran out of GPU memory, while both sparse variants still completed the forward pass.
+At N = 16384, dense attention ran out of GPU memory, while both sparse variants still completed the forward pass.
 
 This is the clearest practical result from the benchmark: sparse attention is not just an optimization of the same workload. It makes sequence lengths feasible that the dense implementation cannot run on the same GPU.
 
@@ -158,17 +158,17 @@ Dense attention was faster for the smaller sequence lengths:
 - 2048: dense 0.00743 s vs ~0.0169 s sparse
 - 4096: dense 0.02617 s vs ~0.0342 s sparse
 
-At \(N=8192\), the ordering changed:
+At N = 8192, the ordering changed:
 
 - dense: 0.10450 s
 - sliding window: 0.08871 s
 - block sparse: 0.09585 s
 
-At \(N=16384\), dense could not run, while sliding window and block sparse both completed in about 0.135 s.
+At N = 16384, dense could not run, while sliding window and block sparse both completed in about 0.135 s.
 
-I did not expect the sparse implementation to be slower at small \(N\), but the result makes sense for this particular implementation. The sparse engine processes query blocks in a Python loop and launches many smaller GPU operations. Dense attention can hand a single large matrix multiplication to the GPU, and for moderate sequence lengths the GPU is very good at doing that efficiently.
+I did not expect the sparse implementation to be slower at small N, but the result makes sense for this particular implementation. The sparse engine processes query blocks in a Python loop and launches many smaller GPU operations. Dense attention can hand a single large matrix multiplication to the GPU, and for moderate sequence lengths the GPU is very good at doing that efficiently.
 
-So this implementation does **not** demonstrate “sparse attention is always faster.” It demonstrates something more useful: there is a crossover. At small enough sequence lengths, the overhead of my simple block-gather implementation dominates. As the sequence gets longer, the quadratic cost of dense attention starts to matter enough that sparse attention catches up and then wins.
+So this implementation does **not** demonstrate "sparse attention is always faster." It demonstrates something more useful: there is a crossover. At small enough sequence lengths, the overhead of my simple block-gather implementation dominates. As the sequence gets longer, the quadratic cost of dense attention starts to matter enough that sparse attention catches up and then wins.
 
 This is also a good reminder not to judge an algorithm only by its asymptotic complexity. The way it is implemented matters. A more optimized sparse kernel could have a very different wall-clock profile.
 
@@ -176,7 +176,7 @@ This is also a good reminder not to judge an algorithm only by its asymptotic co
 
 ## 6. What I learned from the results
 
-The most useful lesson from this experiment was that the benefit of sparsity is not a single number called “speedup.”
+The most useful lesson from this experiment was that the benefit of sparsity is not a single number called "speedup."
 
 There are really two separate questions:
 
@@ -188,13 +188,12 @@ and
 
 The first question favors sparse attention as sequences become long. The second question hurt this implementation at shorter lengths because of Python-level block iteration and many small GPU launches.
 
-The memory result was much cleaner than the timing result. Sparse attention reduced memory usage across the entire benchmark and allowed the experiment to continue to \(N=16384\), where dense attention hit OOM.
+The memory result was much cleaner than the timing result. Sparse attention reduced memory usage across the entire benchmark and allowed the experiment to continue to N = 16384, where dense attention hit OOM.
 
 The quality experiment also made the trade-off more concrete. Sliding-window attention removes direct long-range connections, while BigBird-style attention keeps a small number of routes to distant information through global and random connections. In this small Tiny Shakespeare experiment, neither sparse variant showed a dramatic quality collapse, but the losses were not exactly identical either. That is the cost of throwing away attention edges: some information is genuinely no longer available through a direct connection.
 
 The main takeaway for me is therefore:
 
-> Sparse attention is not “the same attention, but faster.” It is a different connectivity pattern with different computational and information trade-offs.
+> Sparse attention is not "the same attention, but faster." It is a different connectivity pattern with different computational and information trade-offs.
 
-For short sequences, dense attention can still be the better engineering choice. For long sequences, reducing the amount of attention that has to be computed can become the difference between “runs” and “does not fit in memory.”
-
+For short sequences, dense attention can still be the better engineering choice. For long sequences, reducing the amount of attention that has to be computed can become the difference between "runs" and "does not fit in memory."
