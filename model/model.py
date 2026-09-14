@@ -70,3 +70,28 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln2(x))
         return x
 
+class CharGPT(nn.Module):
+    def __init__(self, vocab_size, block_size, n_embd=64, n_head=4, n_layer=2,
+                 attention_type="dense", attn_kwargs=None):
+        super().__init__()
+        self.block_size = block_size
+        self.tok_emb = nn.Embedding(vocab_size, n_embd)
+        self.pos_emb = nn.Embedding(block_size, n_embd)
+        self.blocks = nn.ModuleList([
+            Block(n_embd, n_head, attention_type, attn_kwargs) for _ in range(n_layer)
+        ])
+        self.ln_f = nn.LayerNorm(n_embd)
+        self.head = nn.Linear(n_embd, vocab_size, bias=False)
+
+    def forward(self, idx, targets=None):
+        B, N = idx.shape
+        pos = torch.arange(N, device=idx.device)
+        x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
+        for block in self.blocks:
+            x = block(x)
+        x = self.ln_f(x)
+        logits = self.head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
