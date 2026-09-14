@@ -36,6 +36,8 @@ def report(name, ok, detail=""):
 
 #1.3 sliding window vs dense attention
 
+#Does our efficient sliding-window implementation produce 
+# the same output as dense attention restricted to the exact same sliding-window mask?
 def test_sliding_window_matches_dense_causal():
     B, H, N, D = 2, 3, 97, 16  # N not a multiple of block_size on purpose
     window = 12
@@ -66,6 +68,22 @@ def test_sliding_window_matches_dense_noncausal():
 
 
 #block sparse vs dense attention with mask
+
+"""COMMENTS FOR MY REFERENCE"""
+#does efficient big bird block-sparse attention produce the same output as dense attention restricted to the exact same block-sparse mask?
+#in simple words, by mask, i mean the pattern of allowed key blocks for each query block.
+#the point of this test is to verify bs implementation is correct
+#for example, for query 10 in 4,5,6,7,8,9,10,11,12,13,14, if window is 1, then sliding window
+#implements the same mask as dense attention with a sliding window of 1, and this test checks that the outputs match. 
+#so sliding window will consider keys 9,10,11, along with dense
+#but in sparse, the query block 10 will only consider key blocks 9,10,11
+#so when does the random+global+local pattern come into play
+#if I have [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14] and I have 3 global blocks and 2 random blocks
+#then for query block 10, the allowed key blocks will be 9,10,11 (local), 0,1,2 (global),
+#and 2 random blocks from the remaining blocks (3,4,5,6,7,8,12,13,14)
+#thats bigbird, in normal dense/sparse attention, 10 will consider all key blocks.
+#masking is basically just hiding. the NxN is still there, but masked out entries are set 
+#to -inf.
 
 def test_block_sparse_matches_dense_causal():
     B, H, N, D = 2, 3, 100, 16
@@ -110,12 +128,16 @@ def test_dense_attention_no_nan_on_fully_masked_row():
     mask[2, :] = False  # query 2 has zero valid keys
 
     out, attn = dense_attention(Q, K, V, mask=mask)
+    #did NaN appear in the output or attention weights?
     ok_no_nan = not torch.isnan(out).any() and not torch.isnan(attn).any()
+    #was the output for the fully-masked row set to zero
     ok_zero_row = torch.allclose(out[:, :, 2, :], torch.zeros_like(out[:, :, 2, :]))
+    #were all attention weights zero
     ok_zero_attn = torch.allclose(attn[:, :, 2, :], torch.zeros_like(attn[:, :, 2, :]))
     report("dense_attention: fully-masked row -> no NaN", ok_no_nan and ok_zero_row and ok_zero_attn)
 
 
+#sequence limit is not multiple of block size case
 def test_sliding_window_no_nan_at_block_boundary():
 
     B, H, N, D = 1, 2, 37, 8  # 37 is not a multiple of block_size below
