@@ -19,6 +19,8 @@ The important implementation choice was not to compute the full N×N attention m
 
 I also wrote a correctness harness that compares the sparse implementations against dense attention using the same effective attention pattern.
 
+A note on how I worked: I used an AI assistant heavily while writing the code, which the task brief explicitly allows. `models/model.py` is the part I wrote from my own understanding, based on what I had learned about attention and transformer blocks. For the rest, I spent a lot of time reading through it, running pieces of it by hand on small examples, and figuring out why it was written the way it was. The analysis in this writeup — including the problems I found in my own benchmark and training setup, described below — is mine.
+
 ---
 
 ## 1. Implementation
@@ -34,6 +36,14 @@ This separation turned out to be important. A sparse pattern is not useful for p
 For sliding-window attention, I use a deliberately safe superset of nearby blocks and then apply a finer token-level validity function to trim it to the exact window. For BigBird-style attention, the pattern combines local blocks, global blocks, and randomly selected blocks.
 
 I also had to handle sequence lengths that are not multiples of the block size. Internally, the tensors are padded to whole blocks, but padded key positions are explicitly excluded. Fully masked rows are handled with a `safe_softmax` so they produce zero attention/output instead of NaNs.
+
+### Why the NaN fix is done before the softmax, not after
+
+The obvious way to deal with the NaN is to run the softmax and then replace any NaN in the output with zero. I did not do that, and the reason is worth stating.
+
+If a whole row is `-inf`, softmax produces NaN. Cleaning it up afterwards fixes the numbers you can see in the forward pass, but the NaN has already been produced inside the graph, and during training the gradient flowing back through that row is NaN too. That poisons the parameters even though the forward output looked fine.
+
+So instead, `safe_softmax` detects rows with no valid keys *before* the softmax and fills those rows with `0.0` instead of `-inf`. Softmax of an all-zero row is a uniform distribution, which is meaningless but finite. Then the second `masked_fill` zeroes those entries out, so the row contributes nothing to the output and nothing NaN ever exists in the graph.
 
 ---
 
@@ -52,33 +62,55 @@ The tests also deliberately include awkward cases: a sequence length that is not
 
 The reason for having a dense reference at all is simple: for the sparse implementation, many entries of the conceptual N×N attention matrix are never computed. The reference mask reconstructs those same allowed connections at full resolution, which gives a straightforward way to check the sparse result.
 
+One honest limitation of this harness. For the sliding-window tests, the reference mask is built by `sliding_window_full_mask()`, which is written independently of the pattern builder — so that test really does check both halves of the sparse path. For the BigBird tests, the reference mask is built from the pattern that `build_block_pattern()` returned. That means those tests check the gather-and-compute engine properly, but they cannot catch a bug in the pattern builder itself, because a wrong pattern would produce an equally wrong reference. If I had more time I would build the BigBird reference mask independently too.
+
 ---
 
 ## 3. Character-level GPT experiment
 
 For the quality experiment, I trained the same small character-level GPT with each attention variant on Tiny Shakespeare. The model has 2 transformer layers, 4 attention heads and 64-dimensional embeddings. The training script uses a context length of 128 and compares the three attention mechanisms while keeping the model architecture and optimizer setup the same.
 
-All three models learned the task normally. The final validation losses were in a very similar range rather than showing a dramatic collapse for either sparse method.
+All three models learned the task normally. Rather than quote a single step, which bounces around a lot, here is the mean validation loss over the last five evaluations that all three runs share (steps 2700 to 3100):
 
-At step 3000, the validation losses were:
+| Attention | Mean val loss, steps 2700–3100 | Best single eval |
+|---|---:|---:|
+| Dense | 1.6911 | 1.6632 |
+| Sliding window | 1.6838 | 1.6527 |
+| Block sparse | 1.6995 | 1.6657 |
 
-| Attention | Validation loss |
-|---|---:|
-| Dense | 1.6632 |
-| Sliding window | 1.6527 |
-| Block sparse | 1.6657 |
+The whole spread is about 0.016, and the ordering flips depending on which step you look at. I ran one seed each, so I do not think any of these differences mean anything. The block-sparse run also continued to step 3300 while the other two stopped at 3100, which is another reason not to read the final numbers directly against each other.
 
-At step 3100, they were:
+### Why this experiment could not have found a degradation
 
-| Attention | Validation loss |
-|---|---:|
-| Dense | 1.6915 |
-| Sliding window | 1.6880 |
-| Block sparse | 1.6999 |
+When I set this up, I expected the sparse variants to be at least a little worse and was mildly surprised when they weren't. Looking at the hyperparameters again, I don't think that result means what I wanted it to mean.
 
-The block-sparse run continued further than the other two in the recorded run; at step 3300 its validation loss was 1.6853.
+The training context length is 128 tokens. The sliding window is 32 tokens, and the block-sparse config uses a block size of 16 with 1 global block and 2 random blocks, on a sequence that is only 8 blocks long. So each query can already see a large fraction of the context, and the part it cannot see is 100 characters back in a character-level task where almost all of the useful signal is a few characters away anyway.
 
-I would not interpret the small differences here as proof that one pattern is universally better. This is a small character-level experiment, and the losses fluctuate during training. The useful result is that both sparse patterns remained capable of learning the task rather than becoming unusable because of the information they removed.
+In other words, I did not fail to find a quality cost. I built an experiment that could not have found one. The patterns barely removed anything that mattered at this scale.
+
+If I ran this again, I would use a much longer context — 1024 or more — with a window that is a genuinely small fraction of it, and I would use a task where the dependency is definitely long-range rather than character-level text. The needle-in-a-haystack style setup used in the KV-cache literature would be a better fit, because it tests whether one specific distant fact survived, rather than averaging over a loss where local prediction dominates.
+
+### A bug I found in the block-sparse training run
+
+While going back over `model.py` I found something wrong with how the random pattern is generated.
+
+The generator is created once in `__init__`:
+
+```python
+self._pattern_generator = torch.Generator().manual_seed(1234)
+```
+
+and then passed into the pattern builder on every forward pass. But a generator advances its internal state every time you draw from it. So step 1 draws one set of random blocks, step 2 draws a different set, step 3 a different set again, and eval batches do the same.
+
+The run is still reproducible — rerun it and you get exactly the same sequence of patterns — but the pattern is not *fixed*, which is what BigBird actually specifies. What I trained is closer to a model whose random connections are resampled every step, a bit like a routing-level dropout.
+
+The fix is to store the seed instead of the generator and build a freshly seeded one inside `forward`:
+
+```python
+gen = torch.Generator().manual_seed(self._pattern_seed)
+```
+
+I found this too late to retrain, so the block-sparse quality numbers above should be read with this in mind. Given that all patterns have the same density, I would expect the effect on loss to be small, but I have not verified that. The benchmark has a related issue: it calls the BigBird wrapper with no generator at all, so it falls back to the global RNG and uses a different pattern on each call. That does not affect timing, since the amount of work is the same either way.
 
 ### What information does each pattern lose?
 
@@ -104,7 +136,9 @@ A normal local token participates in attention mostly with its neighbors. A glob
 
 That means a small number of global blocks can influence many parts of the sequence. Removing one ordinary local connection affects a relatively small region; removing a well-placed global connection can remove a route that many query positions were relying on.
 
-I did not run a separate ablation that varies the number of global blocks, so I am treating this as an explanation of the pattern rather than claiming a measured "global-token effect" from this experiment.
+Another way to see it is in terms of how many attention layers it takes for information to travel. With a pure sliding window of size w, information moves at most w positions per layer, so two tokens N apart need roughly N/w layers before they can influence each other at all. A global token collapses that to two hops: everything writes into the global position, and everything reads back out of it. With only 2 layers in my model, that difference is large.
+
+I did not run a separate ablation that varies the number of global blocks, so I am treating this as an explanation of the pattern rather than a measured effect from my experiment. It is the ablation I would run first if I continued.
 
 ---
 
@@ -141,12 +175,58 @@ Memory is where sparse attention showed a clear advantage at every tested sequen
 
 Dense attention's memory grows very quickly with sequence length because the score matrix is quadratic in N. The sparse implementations stay much flatter because they never materialize that full score matrix.
 
-At N = 8192, dense attention used about 5.47 GB of peak GPU memory in this benchmark, compared with about 42 MB for sliding-window attention and 43 MB for block-sparse attention.
-Hence dense attention uses almost 130x the amount of compute than sliding window and block sparse attention.
+At N = 8192, dense attention used about 5.47 GB of peak GPU memory, compared with about 42 MB for sliding-window and 43 MB for block-sparse. That is roughly **130× the peak memory**, not 130× the compute — the timing column right next to it shows the three variants within about 15% of each other at that length, so the two numbers are measuring completely different things.
 
 At N = 16384, dense attention ran out of GPU memory, while both sparse variants still completed the forward pass.
 
-This is the clearest practical result from the benchmark: sparse attention is not just an optimization of the same workload. It makes sequence lengths feasible that the dense implementation cannot run on the same GPU.
+### How much of that 130× is real?
+
+I wanted to check whether the 130× was actually the quadratic scaling or partly my own implementation, so I worked out what dense *should* use.
+
+At N = 8192 with B=1, H=4, in fp32, one N×N score tensor is:
+
+```
+4 heads × 8192 × 8192 × 4 bytes = 1024 MB
+```
+
+So the score matrix itself is 1 GB. Measured peak was 5472 MB. The gap is `safe_softmax`, which does everything out of place:
+
+```python
+masked_scores = scores.masked_fill(...)          # copy 2
+safe_scores   = masked_scores.masked_fill(...)   # copy 3
+attn          = F.softmax(safe_scores, dim=-1)   # copy 4
+attn          = attn.masked_fill(...)            # copy 5
+```
+
+That is five live 1024 MB tensors = 5120 MB, plus a couple of hundred MB for the boolean masks being materialized at full shape by `~valid_mask`. Which lands almost exactly on the 5472 MB I measured.
+
+So the honest breakdown of the 130× is:
+
+- about **24×** is inherent — 1024 MB of score matrix against 43 MB of gathered blocks
+- the rest is my dense baseline making five copies of a tensor it only needed one or two of
+
+An in-place version would look like this:
+
+```python
+def safe_softmax(scores, valid_mask, inplace=False):
+    valid_mask = valid_mask.expand_as(scores)
+    invalid = ~valid_mask
+    row_has_valid = valid_mask.any(dim=-1, keepdim=True)
+
+    s = scores if inplace else scores.clone()
+    s.masked_fill_(invalid, float('-inf'))
+    s.masked_fill_(~row_has_valid, 0.0)
+
+    attn = torch.softmax(s, dim=-1)
+    attn.masked_fill_(invalid, 0.0)
+    return attn
+```
+
+`inplace=True` is safe inside `dense_attention` because `scores` comes straight out of the matmul and nothing else holds a reference to it. That brings peak down to roughly scores + attn + one boolean mask, about 2.3 GB instead of 5.5 GB.
+
+This matters for the headline result. At N = 16384 the score matrix is 4 GB, so a memory-tight dense implementation would need something like 9 GB, which probably **would** fit on a 15 GB T4. In other words the OOM I reported is partly a property of my baseline rather than a hard wall of the algorithm. The sparse advantage is real, but at these lengths it is closer to 25× than 130×, and dense dies later than my table suggests.
+
+I did not rerun the benchmark with the fixed version before the deadline, so the numbers in the table are the ones I actually measured with the code as submitted.
 
 ### Time
 
@@ -171,7 +251,27 @@ I did not expect the sparse implementation to be slower at small N, but the resu
 
 So this implementation does **not** demonstrate "sparse attention is always faster." It demonstrates something more useful: there is a crossover. At small enough sequence lengths, the overhead of my simple block-gather implementation dominates. As the sequence gets longer, the quadratic cost of dense attention starts to matter enough that sparse attention catches up and then wins.
 
-This is also a good reminder not to judge an algorithm only by its asymptotic complexity. The way it is implemented matters. A more optimized sparse kernel could have a very different wall-clock profile.
+### Something wrong with how I timed it
+
+Going back over `benchmarks.py`, the timing comparison is not as fair as I thought, and it is unfair in the direction of making sparse look worse.
+
+For dense, the causal mask is built once, *outside* the timed function:
+
+```python
+mask = causal_mask(N, device=DEVICE)
+fn = lambda: dense_attention(Q, K, V, mask=mask)[0]
+```
+
+For the sparse variants, `fn` calls the wrapper functions, and those call `build_block_pattern()` internally — so the block pattern is rebuilt on **every timed iteration**. At N = 16384 with block size 64 that is 256 query blocks, each running a Python list comprehension over 256 candidates, plus a `randperm` for the BigBird case. All of that is CPU work with no GPU involvement, and I timed it as if it were part of attention.
+
+There is a smaller version of the same problem inside `block_sparse_attention`, where the gather indices `k_idx` are rebuilt with `torch.cat([torch.arange(...)])` for every query block on every call. A real implementation would compute those once and reuse them.
+
+The fix is to build the pattern once and pass it straight to `block_sparse_attention` inside the timed lambda. I did not rerun the benchmark with this change before the deadline, so the numbers above stand as measured, but the correct reading is:
+
+- the **memory** results are unaffected, since none of this allocates GPU memory
+- the **timing** results overstate the sparse cost at small N, and the real crossover point is earlier than 8192
+
+I would rather report this than quietly present a comparison I now know is tilted.
 
 ---
 
@@ -187,14 +287,26 @@ and
 
 **How much overhead did my implementation introduce?**
 
-The first question favors sparse attention as sequences become long. The second question hurt this implementation at shorter lengths because of Python-level block iteration and many small GPU launches.
+The first question favors sparse attention as sequences become long. The second question hurt this implementation at shorter lengths because of Python-level block iteration and many small GPU launches — and, as it turns out, because of measurement overhead I built into the benchmark itself.
 
-The memory result was much cleaner than the timing result. Sparse attention reduced memory usage across the entire benchmark and allowed the experiment to continue to N = 16384, where dense attention hit OOM.
+The memory result was much cleaner than the timing result. But even there, working out the arithmetic afterwards showed that a good chunk of my dense baseline's memory was avoidable copies rather than the algorithm. The score matrix is what makes dense attention expensive; my implementation made it about five times more expensive than it needed to be.
 
-The quality experiment also made the trade-off more concrete. Sliding-window attention removes direct long-range connections, while BigBird-style attention keeps a small number of routes to distant information through global and random connections. In this small Tiny Shakespeare experiment, neither sparse variant showed a dramatic quality collapse, but the losses were not exactly identical either. That is the cost of throwing away attention edges: some information is genuinely no longer available through a direct connection.
+The quality experiment taught me something different and slightly uncomfortable: it is easy to run an experiment, get a clean-looking result, and not notice that the setup could never have produced the result you were looking for. A 32-token window on a 128-token context does not test long-range information loss.
 
 The main takeaway for me is therefore:
 
-> Sparse attention is not "the same attention, but faster." It is a different connectivity pattern with different computational and information trade-offs.
+> Sparse attention is not "the same attention, but faster." It is a different connectivity pattern with different computational and information trade-offs — and measuring those trade-offs correctly is a separate skill from implementing them.
 
 For short sequences, dense attention can still be the better engineering choice. For long sequences, reducing the amount of attention that has to be computed can become the difference between "runs" and "does not fit in memory."
+
+---
+
+## 7. What I would do next
+
+In rough priority order:
+
+1. Rerun the benchmark with the pattern built outside the timed region, and with the in-place `safe_softmax`, to get a fair time curve and an honest OOM point for dense.
+2. Fix the resampling generator and retrain block-sparse.
+3. Rerun the quality experiment at context length 1024+ with a window that is a genuinely small fraction of it, so the comparison can actually fail.
+4. Ablate the number of global blocks, which is the one claim in this writeup I explained but did not measure.
+5. Batch the query-block loop instead of iterating in Python, which is the main reason sparse loses at small N.
