@@ -71,6 +71,21 @@ data/
 
 The exact surrounding filenames can be changed without affecting the core idea; the important modules are the dense attention reference, sparse attention implementation, model, training script, correctness tests, and benchmark script.
 
+## Data ( important )
+
+As the instructions had said, I haven't added the data/ directory in the repository.
+
+To run it in an alternative efficient way, you must download the entire repo, into a folder named Sparse_Attention, and add a directory named 'data' with tinyshakespeare.txt in it.
+
+Once that's done, convert the Sparse_Attention folder into a ".zip" file.
+Make sure the directory structure is : 
+Sparse_Attention.zip/Sparse_Attention/...
+
+Then using this colab link : 
+https://colab.research.google.com/drive/1U71dVKyKjdcfkSZjfEt_LErZLaicyIEp?usp=sharing
+
+You may upload Sparse_Attention.zip and run benchmarks and the training loop to evaluate the model.
+
 ## Correctness
 
 The correctness tests compare the sparse implementations against dense attention using the same effective attention pattern.
