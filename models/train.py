@@ -7,10 +7,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import torch
+from models.model import CharGPT
 
-from model.model import CharGPT
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tinyshakespeare.txt")
 BLOCK_SIZE = 128
