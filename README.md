@@ -9,6 +9,13 @@ It also contains a dense attention reference implementation, a correctness harne
 
 The point of the project is not just to reproduce a known sparse-attention pattern. I wanted to understand what changes when we stop computing the full $N \times N$ attention matrix, how to verify that the sparse implementation is correct, and what the trade-offs actually look like on a real GPU.
 
+
+## DISCLAIMER
+
+- Most of the code in benchmarks.py and test_correctness.py was written by assistance from Claude and ChatGPT. 
+- As for sparse_patterns, while the logic was something I derived from the documentation, I had implemented in code using ChatGPT. But I have completely understood the structure and flow of the code as much as I could. 
+- Most of my commits afer 20 are just minor edits, please ignore them.
+
 ## What is being compared?
 
 Dense causal attention computes
